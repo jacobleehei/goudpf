@@ -3,13 +3,14 @@ package main
 import (
 	"log"
 	"net"
+	"time"
 
 	"github.com/alexflint/go-arg"
 )
 
 var args struct {
 	SourceAddr string `arg:"-s, --source, required" help:"Source UDP server address (e.g. 0.0.0.0:161)"`
-	TargetAddr string `arg:"-t, --target required" help:"Target UDP server address (e.g. 192.168.9.80:161)"`
+	TargetAddr string `arg:"-t, --target, required" help:"Target UDP server address (e.g. 192.168.9.80:161)"`
 }
 
 func init() {
@@ -46,6 +47,7 @@ func forwardServerUdpPacket(addr *net.UDPAddr, packet []byte) (resp []byte, err 
 		return
 	}
 	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(60 * time.Second))
 
 	_, err = conn.Write(packet)
 	if err != nil {
@@ -90,15 +92,19 @@ func createUdpServer(addr string, readHandler ...handler) error {
 			return err
 		}
 
-		for _, handler := range readHandler {
-			result, err := handler(buf[:n])
-			if err != nil {
-				return err
-			}
+		for _, h := range readHandler {
+			// start a goroutine to handle the request
+			// no blocking the next request
+			go func(h handler, packet []byte) {
+				result, err := h(packet)
+				if err != nil {
+					log.Println("Error: ", err)
+				}
 
-			if result != nil {
-				ServerConn.WriteToUDP(result, addr)
-			}
+				if result != nil {
+					ServerConn.WriteToUDP(result, addr)
+				}
+			}(h, buf[:n])
 		}
 	}
 }
